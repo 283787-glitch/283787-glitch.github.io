@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Państwa-Miasta</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f4f7f6; color: #333; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        h1, h2, h3 { color: #2c3e50; }
+        .btn { background: #3498db; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; }
+        .btn:hover { background: #2980b9; }
+        .btn-stop { background: #e74c3c; width: 100%; padding: 15px; font-size: 20px; margin-top: 20px; }
+        .btn-stop:hover { background: #c0392b; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .categories-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 15px 0; }
+        label { cursor: pointer; display: flex; align-items: center; gap: 8px; }
+        .input-group { margin-bottom: 15px; }
+        .input-group label { font-weight: bold; display: block; margin-bottom: 5px; }
+        .input-group input { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+        
+        #game-board, #results-board { display: none; }
+        .letter-display { font-size: 48px; font-weight: bold; color: #e67e22; text-align: center; margin: 10px 0; }
+        .add-cat-box { display: flex; gap: 10px; margin-bottom: 15px; }
+        .add-cat-box input { flex-grow: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        
+        /* Styl tabeli wyników */
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #3498db; color: white; }
+        td:first-child { font-weight: bold; background-color: #f9f9f9; }
+    </style>
+</head>
+<body>
+
+    <h1>🌍 Państwa-Miasta Multiplayer</h1>
+
+    <div class="card">
+        <p>Zaproś znajomych linkiem: <strong id="invite-link"></strong> <button class="btn" onclick="copyLink()" style="padding: 5px 10px; font-size: 14px;">📋 Kopiuj</button></p>
+        <p>Graczy w pokoju: <strong id="player-count">1</strong></p>
+    </div>
+
+    <!-- LOBBY -->
+    <div class="card" id="lobby">
+        <div class="input-group">
+            <label>Twój nick w grze:</label>
+            <input type="text" id="player-name" placeholder="Wpisz swoje imię..." value="Gracz">
+        </div>
+
+        <div class="grid-2">
+            <div>
+                <h3>1. Wybierz język</h3>
+                <select id="game-language" style="padding: 8px; width: 100%; border-radius: 4px;">
+                    <option value="PL">Polski</option>
+                    <option value="EN">English</option>
+                    <option value="DE">Deutsch</option>
+                </select>
+            </div>
+            <div>
+                <h3>2. Dodaj własną kategorię</h3>
+                <div class="add-cat-box">
+                    <input type="text" id="new-category" placeholder="Np. Tytuł filmu...">
+                    <button class="btn" onclick="addCategory()">Dodaj</button>
+                </div>
+            </div>
+        </div>
+
+        <h3>3. Wybierz kategorie:</h3>
+        <div class="categories-grid" id="categories-list">
+            <label><input type="checkbox" value="Państwa" checked> Państwa</label>
+            <label><input type="checkbox" value="Miasta" checked> Miasta</label>
+            <label><input type="checkbox" value="Imiona" checked> Imiona</label>
+            <label><input type="checkbox" value="Zwierzęta" checked> Zwierzęta</label>
+            <label><input type="checkbox" value="Rośliny" checked> Rośliny</label>
+            <label><input type="checkbox" value="Rzeczy" checked> Rzeczy</label>
+        </div>
+        <button class="btn" onclick="startGame()" style="width: 100%; margin-top: 10px;">▶️ Rozpocznij grę</button>
+    </div>
+
+    <!-- PLANSZA GRY -->
+    <div class="card" id="game-board">
+        <div class="letter-display">Litera: <span id="current-letter">?</span></div>
+        <div id="inputs-container"></div>
+        <button class="btn btn-stop" onclick="triggerStop()">🛑 STOP!</button>
+    </div>
+
+    <!-- TABELA WYNIKÓW -->
+    <div class="card" id="results-board">
+        <h2>Koniec rundy! Odpowiedzi graczy:</h2>
+        <div id="results-container"></div>
+        <button class="btn" onclick="backToLobby()" style="width: 100%; margin-top: 20px;">🔄 Wróć do lobby / Zagraj ponownie</button>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+
+        // Obsługa URL i pokoi
+        const urlParams = new URLSearchParams(window.location.search);
+        let room = urlParams.get('room');
+        if (!room) {
+            room = Math.random().toString(36).substring(2, 8);
+            window.history.replaceState({}, '', `?room=${room}`);
+        }
+        document.getElementById('invite-link').innerText = window.location.href;
+        socket.emit('joinRoom', room);
+
+        function copyLink() {
+            navigator.clipboard.writeText(window.location.href);
+            alert("Skopiowano link!");
+        }
+
+        socket.on('playerCount', (count) => {
+            document.getElementById('player-count').innerText = count;
+        });
+
+        function addCategory() {
+            const val = document.getElementById('new-category').value.trim();
+            if (!val) return;
+            const list = document.getElementById('categories-list');
+            list.innerHTML += `<label><input type="checkbox" value="${val}" checked> ${val}</label>`;
+            document.getElementById('new-category').value = '';
+        }
+
+        function startGame() {
+            const checkboxes = document.querySelectorAll('#categories-list input:checked');
+            const categories = Array.from(checkboxes).map(cb => cb.value);
+            const language = document.getElementById('game-language').value;
+            
+            if (categories.length === 0) return alert("Wybierz kategorie!");
+            socket.emit('startGame', { room, categories, language });
+        }
+
+        socket.on('gameStarted', ({ letter, categories }) => {
+            document.getElementById('lobby').style.display = 'none';
+            document.getElementById('results-board').style.display = 'none';
+            document.getElementById('game-board').style.display = 'block';
+            document.getElementById('current-letter').innerText = letter;
+
+            const container = document.getElementById('inputs-container');
+            container.innerHTML = '';
+            
+            categories.forEach(cat => {
+                container.innerHTML += `
+                    <div class="input-group">
+                        <label>${cat}</label>
+                        <input type="text" class="game-input" data-category="${cat}" autocomplete="off">
+                    </div>
+                `;
+            });
+
+            // Upewniamy się, że przycisk STOP jest znów aktywny
+            document.querySelector('.btn-stop').innerText = "🛑 STOP!";
+            document.querySelector('.btn-stop').disabled = false;
+        });
+
+        function triggerStop() {
+            socket.emit('stopGame', { room });
+        }
+
+        // Gdy ktoś (dowolny gracz) wciśnie STOP
+        socket.on('forceStop', () => {
+            // Blokujemy pola
+            document.querySelectorAll('.game-input').forEach(input => input.disabled = true);
+            document.querySelector('.btn-stop').innerText = "⏳ Oczekiwanie na odpowiedzi innych graczy...";
+            document.querySelector('.btn-stop').disabled = true;
+
+            const playerName = document.getElementById('player-name').value || "Nieznajomy";
+            const answers = {};
+            document.querySelectorAll('.game-input').forEach(input => {
+                answers[input.dataset.category] = input.value.trim();
+            });
+
+            // Wysyłamy nasze odpowiedzi na serwer
+            socket.emit('submitAnswers', { room, answers, playerName });
+        });
+
+        // Odbieranie wszystkich odpowiedzi i budowanie tabeli
+        socket.on('showResults', (allAnswers) => {
+            document.getElementById('game-board').style.display = 'none';
+            document.getElementById('results-board').style.display = 'block';
+
+            const playerIds = Object.keys(allAnswers);
+            if (playerIds.length === 0) return;
+
+            // Pobieramy listę kategorii od pierwszego gracza (każdy ma te same)
+            const categories = Object.keys(allAnswers[playerIds[0]].answers);
+
+            let html = '<table>';
+            html += '<tr><th>Kategoria</th>';
+            
+            // Nagłówki z nickami graczy
+            playerIds.forEach(id => {
+                html += `<th>${allAnswers[id].playerName}</th>`;
+            });
+            html += '</tr>';
+
+            // Wiersze z odpowiedziami
+            categories.forEach(cat => {
+                html += `<tr><td>${cat}</td>`;
+                playerIds.forEach(id => {
+                    const ans = allAnswers[id].answers[cat];
+                    // Jeśli puste, wpisz kreskę
+                    html += `<td>${ans ? ans : '<em>- brak -</em>'}</td>`;
+                });
+                html += '</tr>';
+            });
+
+            html += '</table>';
+            document.getElementById('results-container').innerHTML = html;
+        });
+
+        function backToLobby() {
+            document.getElementById('results-board').style.display = 'none';
+            document.getElementById('lobby').style.display = 'block';
+        }
+    </script>
+</body>
+</html>
